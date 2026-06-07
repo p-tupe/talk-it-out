@@ -17,15 +17,18 @@ pub fn spawn() -> mpsc::Sender<Payload> {
         let mut itr = rx.iter();
 
         loop {
-            let Payload {
+            let Some(Payload {
                 html_doc,
                 sender_chan,
-            } = itr.next().unwrap();
+            }) = itr.next()
+            else {
+                break;
+            };
 
             let article = match readability.parse(&html_doc) {
                 Ok(v) => v,
                 Err(e) => {
-                    sender_chan.send(Err(e)).unwrap();
+                    let _ = sender_chan.send(Err(e));
                     return;
                 }
             };

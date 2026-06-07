@@ -3,9 +3,14 @@ use tracing::info;
 
 mod handler;
 mod readability_parser;
+mod tts;
 
 #[tokio::main]
 async fn main() {
+    rustls::crypto::aws_lc_rs::default_provider()
+        .install_default()
+        .unwrap();
+
     tracing_subscriber::fmt().init();
 
     let parser = readability_parser::spawn();

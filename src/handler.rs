@@ -10,6 +10,7 @@ use tokio::sync::oneshot;
 use tracing::{error, info};
 
 use crate::readability_parser::Payload;
+use crate::tts::generate;
 
 #[derive(Deserialize)]
 pub struct Params {
@@ -61,13 +62,13 @@ pub async fn root(
     }
 
     let (os_tx, os_rx) = oneshot::channel();
-
     state.parser.send(Payload {
         html_doc: text,
         sender_chan: os_tx,
     })?;
-
     let article = os_rx.await??;
+
+    generate(&article).await?;
 
     Ok(article)
 }
