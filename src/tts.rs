@@ -1,13 +1,20 @@
 //! TTS interface for generating audio
 
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
+
 use anyhow::{Error, Result, anyhow};
 use msedge_tts::{
-    tts::{SpeechConfig, client::tokio_runtime::connect_async},
+    tts::{
+        SpeechConfig,
+        stream::{SynthesizedResponse, msedge_tts_split},
+    },
     voice::tokio_runtime::get_voices_list_async,
 };
-use std::time::Instant;
 
-pub async fn generate(content: &str) -> Result<Vec<f32>> {
+pub async fn generate(content: String) -> Result<Vec<u8>> {
     let voices = get_voices_list_async().await.map_err(Error::msg)?;
 
     let Some(voice) = voices
@@ -17,22 +24,27 @@ pub async fn generate(content: &str) -> Result<Vec<f32>> {
         return Err(anyhow!("Could not find voice"));
     };
 
-    println!("choose '{}' to synthesize...", voice.name);
     let config = SpeechConfig::from(voice);
-    let mut tts = connect_async().await.map_err(Error::msg)?;
-    let start = Instant::now();
-    let audio = tts.synthesize(content, &config).await.map_err(Error::msg)?;
-    println!("Done {:?}", Instant::now() - start);
+    let (mut sender, mut reader) = msedge_tts_split().unwrap();
+    let signal = Arc::new(AtomicBool::new(false));
+    let end = signal.clone();
 
-    println!("play audio...");
-    let handle = rodio::DeviceSinkBuilder::open_default_sink().unwrap();
-    let player = rodio::Player::connect_new(handle.mixer());
+    sender.send(&content, &config).unwrap();
+    end.store(true, Ordering::Relaxed);
 
-    let decoder = rodio::decoder::Decoder::new(std::io::Cursor::new(audio.audio_bytes)).unwrap();
+    let mut audio_bytes = vec![];
+    loop {
+        if !reader.can_read() {
+            break;
+        }
 
-    player.append(decoder);
-    player.sleep_until_end();
-    println!("play audio done.");
+        let audio = reader.read().unwrap();
+        if let Some(chunk) = audio {
+            if let SynthesizedResponse::AudioBytes(b) = chunk {
+                audio_bytes.extend(b);
+            };
+        };
+    }
 
-    Ok(vec![])
+    Ok(audio_bytes)
 }

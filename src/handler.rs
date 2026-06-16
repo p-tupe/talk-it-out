@@ -2,7 +2,7 @@ use std::sync::mpsc;
 
 use axum::{
     extract::{Query, Request, State},
-    response::{IntoResponse, Response},
+    response::{Html, IntoResponse, Response},
 };
 use reqwest::StatusCode;
 use serde::Deserialize;
@@ -45,12 +45,11 @@ where
     }
 }
 
-#[axum::debug_handler]
 pub async fn root(
     params: Query<Params>,
     state: State<AppState>,
     req: Request,
-) -> Result<String, AppError> {
+) -> impl IntoResponse {
     info!("{} {}", req.method(), req.uri());
 
     let resp = reqwest::get(&params.url).await?;
@@ -68,7 +67,32 @@ pub async fn root(
     })?;
     let article = os_rx.await??;
 
-    generate(&article).await?;
+    Ok(generate(article).await?)
+}
 
-    Ok(article)
+pub async fn test_page() -> Html<String> {
+    Html(
+        "
+<input type='text' id='url-input' placeholder='Enter URL here'> </input>
+<button type='button' onclick='getAudio()'>Go</button>
+
+<audio controls style='display:none'>
+  <source src='' type='audio/mpeg'>
+  Your browser does not support the audio tag.
+</audio>
+
+<script>
+function getAudio() {
+  const url = document.querySelector('#url-input').value;
+
+  const audio = document.querySelector('audio');
+  audio.style.display = 'block';
+  const source = audio.querySelector('source');
+  source.src = 'http://127.0.0.1:8080?url=' + url;
+  audio.load();
+}
+</script>
+"
+        .to_string(),
+    )
 }

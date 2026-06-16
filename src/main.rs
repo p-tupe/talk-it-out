@@ -1,3 +1,5 @@
+use std::env;
+
 use axum::{Router, routing::get};
 use tracing::info;
 
@@ -17,13 +19,13 @@ async fn main() {
 
     let router = Router::new()
         .route("/", get(handler::root))
-        .route("/widget.js", get(async || "some js code"))
+        .route("/test_page", get(handler::test_page))
         .with_state(handler::AppState { parser });
 
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:8080")
-        .await
-        .unwrap();
+    let port = env::var("PORT").unwrap_or("8080".into());
+    let addr = format!("127.0.0.1:{}", port);
+    let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
 
-    info!("Server started on {}", listener.local_addr().unwrap());
+    info!("Server started on {}", addr);
     axum::serve(listener, router).await.unwrap();
 }
