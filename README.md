@@ -1,7 +1,8 @@
 <br />
-<div style="max-width:50%" align="center"> <img src="./logo.png" alt="TIO Logo"> </div>
-<p align="center"><strong>Turn any web page into an audio stream!</strong></p>
+<div align="center"> <img width='300px' src="./logo.png" alt="TIO Logo"> </div>
 <br />
+<p align="center"><strong>Turn any web page into an audio stream!</strong></p>
+<hr />
 
 Check a demo out on: [app.priteshtupe.com/tio](https://app.priteshtupe.com/tio)
 
