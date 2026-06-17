@@ -26,7 +26,7 @@
       border-radius: 20px;
       padding: 2.5rem 2rem;
       width: 100%;
-      max-width: 480px;
+      max-width: 680px;
       margin: 2rem 1rem;
       box-shadow: 0 4px 24px rgba(0, 0, 0, 0.06);
       display: flex;
@@ -100,12 +100,17 @@
     <p>Give me a URL and I'll talk it out to you</p>
     <input id="url" type="url" placeholder="https://..." autofocus />
     <button id="play">Play Now</button>
+    <div id="warnings" style="font-size: 0.8em; color: orange; margin-top: 1em;">
+      <div>May take ~10-15s for first audio byte, since I'm hosting this on a free potato;
+        Also, navigating away from the tab will close audio after a while.</div>
+    </div>
     <audio id="player" controls hidden />
   </div>
   <script>
     const url = document.getElementById('url');
     const btn = document.getElementById('play');
     const player = document.getElementById('player');
+    const warnings = document.getElementById('warnings');
 
     async function play() {
       if (!url.value) return;
@@ -117,7 +122,8 @@
 
     player.onplaying = () => {
       btn.classList.remove('loading');
-      player.hidden = false
+      player.hidden = false;
+      warnings.hidden = true;
       btn.textContent = 'Play Now';
     };
 

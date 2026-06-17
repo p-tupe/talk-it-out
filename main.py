@@ -1,13 +1,17 @@
 import logging
+import os
 
 import httpx
 import readabilipy
 from kokoro_onnx import Kokoro
 from quart import Quart, Response, request, send_from_directory
 import lameenc
+import onnxruntime as rt
+import asyncio
+
+n_threads = os.cpu_count() or 4
 
 app = Quart(__name__)
-kokoro = Kokoro("./model.onnx", "./voices.bin")
 
 logging.basicConfig(
     level=logging.INFO,
@@ -16,6 +20,20 @@ logging.basicConfig(
 logging.getLogger("httpx").setLevel(logging.ERROR)
 logging.getLogger("phonemizer").setLevel(logging.ERROR)
 log = logging.getLogger()
+
+
+sess_opts = rt.SessionOptions()
+sess_opts.intra_op_num_threads = n_threads
+sess_opts.inter_op_num_threads = max(1, n_threads // 2)
+sess_opts.graph_optimization_level = rt.GraphOptimizationLevel.ORT_ENABLE_ALL
+sess_opts.enable_cpu_mem_arena = False
+
+sess = rt.InferenceSession(
+    "./model.onnx", sess_opts, providers=["CPUExecutionProvider"]
+)
+
+kokoro = Kokoro.from_session(sess, "./voices.bin")
+kokoro.create("Hello.", voice="af_heart")  # warmup
 
 
 @app.route("/stream")
@@ -60,10 +78,16 @@ async def generate(content: str):
     enc.set_quality(5)
     enc.set_bit_rate(128)
 
-    async for samples, _ in stream:
-        raw = (samples * 32767).astype("<i2").tobytes()
-        yield enc.encode(raw)
-    yield enc.flush()
+    try:
+        async for samples, _ in stream:
+            raw = (samples * 32767).astype("<i2").tobytes()
+            yield enc.encode(raw)
+        yield enc.flush()
+    except (asyncio.CancelledError, GeneratorExit):
+        log.info("client disconnected")
+    finally:
+        enc = None
+        await stream.aclose()
 
 
 @app.route("/")
