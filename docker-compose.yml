@@ -1,0 +1,6 @@
+services:
+  tio:
+    build: .
+    ports:
+      - "8083:8080"
+    restart: unless-stopped

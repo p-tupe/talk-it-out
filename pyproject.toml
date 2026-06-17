@@ -7,6 +7,7 @@ requires-python = ">=3.12"
 dependencies = [
     "httpx>=0.28.1",
     "kokoro-onnx>=0.3.9",
+    "lameenc>=1.8.2",
     "quart>=0.20.0",
     "readabilipy>=0.3.0",
     "soundfile>=0.14.0",

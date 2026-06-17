@@ -1,11 +1,10 @@
-import io
 import logging
-import struct
 
 import httpx
 import readabilipy
 from kokoro_onnx import Kokoro
 from quart import Quart, Response, request, send_from_directory
+import lameenc
 
 app = Quart(__name__)
 kokoro = Kokoro("./model.onnx", "./voices.bin")
@@ -44,7 +43,7 @@ async def stream():
 
     article = readabilipy.simple_json_from_html_string(html).get("plain_text") or []
     content = "\n".join((p["text"] for p in article if isinstance(p.get("text"), str)))
-    return Response(generate(content), mimetype="audio/wav")
+    return Response(generate(content), mimetype="audio/mpeg")
 
 
 async def generate(content: str):
@@ -55,27 +54,23 @@ async def generate(content: str):
         lang="en-us",
     )
 
-    first = True
-    async for samples, sr in stream:
-        if first:
-            yield wav_header(sr)
-            first = False
+    enc = lameenc.Encoder()
+    enc.set_channels(1)
+    enc.set_in_sample_rate(24000)
+    enc.set_quality(5)
+    enc.set_bit_rate(128)
 
-        yield (samples * 32767).astype("<i2").tobytes()
-
-
-def wav_header(sample_rate):
-    buf = io.BytesIO()
-    buf.write(b"RIFF")
-    buf.write(b"\xff\xff\xff\xff")
-    buf.write(b"WAVE")
-    buf.write(b"fmt ")
-    buf.write(struct.pack("<IHHIIHH", 16, 1, 1, sample_rate, sample_rate * 2, 2, 16))
-    buf.write(b"data")
-    buf.write(b"\xff\xff\xff\xff")
-    return buf.getvalue()
+    async for samples, _ in stream:
+        raw = (samples * 32767).astype("<i2").tobytes()
+        yield enc.encode(raw)
+    yield enc.flush()
 
 
 @app.route("/")
 async def home():
     return await send_from_directory("./", "index.html")
+
+
+@app.route("/logo.png")
+async def static_files():
+    return await send_from_directory("./", "logo.png")
