@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path"
+	"syscall"
 	"time"
 
 	"codeberg.org/readeck/go-readability/v2"
@@ -80,7 +82,7 @@ func stream(w http.ResponseWriter, r *http.Request) error {
 		return fmt.Errorf("readability frim url error: %w", err)
 	}
 
-	tempF, err := os.CreateTemp("", time.Now().String()+".txt")
+	tempF, err := os.CreateTemp("", article.Title()+".txt")
 	if err != nil {
 		return fmt.Errorf("create temp file error: %w", err)
 	}
@@ -94,18 +96,27 @@ func stream(w http.ResponseWriter, r *http.Request) error {
 
 	// We'll use this pipe to stream output from
 	// tts directly to http response
-	readPipe, writePipe := io.Pipe()
+	pipePath := path.Join(os.TempDir(), article.Title())
+	err = syscall.Mkfifo(pipePath, 0640)
+	if err != nil {
+		return fmt.Errorf("make fifo error: %w", err)
+	}
+	defer os.Remove(pipePath)
+
+	pipeReader, err := os.Open(pipePath)
+	if err != nil {
+		return fmt.Errorf("make pipe reader error: %w", err)
+	}
+	defer pipeReader.Close()
 
 	cmd := exec.Command(
-		"kokoro-tts", tempF.Name(),
+		"kokoro-tts", tempF.Name(), pipePath,
 		"--model", "./model.onnx",
 		"--voices", "./voices.bin",
 		"--format", "mp3",
 		"--voice", "af_heart:50,af_bella:50",
-		"--stream",
 	)
 
-	cmd.Stdout = writePipe
 	cmd.Start()
 	defer cmd.Wait()
 
@@ -115,6 +126,6 @@ func stream(w http.ResponseWriter, r *http.Request) error {
 	}()
 
 	w.Header().Set("Content-Type", "audio/mpeg")
-	io.Copy(w, readPipe)
+	io.Copy(w, pipeReader)
 	return nil
 }
