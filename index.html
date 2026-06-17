@@ -5,7 +5,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Talk it Out</title>
-  <link rel="icon" type="image/png" href="/logo.png">
+  <link rel="icon" type="image/png" href="logo.png">
   <style>
     * {
       box-sizing: border-box;
@@ -96,7 +96,7 @@
 
 <body>
   <div class="card">
-    <img style="max-width: 50%;margin-bottom: 1em;" src="/logo.png" alt="TIO Logo" />
+    <img style="max-width: 50%;margin-bottom: 1em;" src="logo.png" alt="TIO Logo" />
     <p>Give me a URL and I'll talk it out to you</p>
     <input id="url" type="url" placeholder="https://..." autofocus />
     <button id="play">Play Now</button>
@@ -111,7 +111,7 @@
       if (!url.value) return;
       btn.classList.add('loading');
       btn.textContent = 'Loading ...';
-      player.src = '/stream?url=' + encodeURIComponent(url.value);
+      player.src = new URL('stream?url=' + encodeURIComponent(url.value), window.location.href).href;
       player.play();
     }
 
