@@ -1,5 +1,5 @@
 services:
-  tio:
+  app:
     build: .
     ports:
       - "8083:8080"
