@@ -1,6 +1,8 @@
 package main
 
 import (
+	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -13,12 +15,12 @@ import (
 
 // max 4 concurrent kokoro processes
 var ttsLimit = make(chan struct{}, 4)
+var counter = 0
 
 func main() {
-	println("\n\n\t------- TIO: Talk It Out -------\n\n")
+	http.Handle("/stream", streamHandler(stream))
 
-	http.HandleFunc("/", rootHandler)
-	http.HandleFunc("/test_page", func(w http.ResponseWriter, r *http.Request) {
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		slog.Info("Request:", r.Method, r.URL)
 		w.Header().Set("Content-Type", "text/html")
 		w.Write([]byte(`
@@ -33,17 +35,35 @@ func main() {
         </script>
     `))
 	})
-	http.ListenAndServe("127.0.0.1:8080", nil)
+
+	port, ok := os.LookupEnv("PORT")
+	if !ok || port == "" {
+		port = "8083"
+	}
+
+	slog.Info("TIO listening on 127.0.0.1:" + port)
+	http.ListenAndServe("127.0.0.1:"+port, nil)
 }
 
-func rootHandler(w http.ResponseWriter, r *http.Request) {
-	slog.Info("Request:", r.Method, r.URL)
+type streamHandler func(w http.ResponseWriter, r *http.Request) error
 
+func (s streamHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	counter += 1
+	c := counter
+
+	slog.Info("Request:", "id", c, r.Method, r.URL)
+
+	if err := s(w, r); err != nil {
+		slog.Error("Response:", "id", c, "status", http.StatusInternalServerError, "error", err.Error())
+		w.WriteHeader(500)
+	}
+}
+
+func stream(w http.ResponseWriter, r *http.Request) error {
 	select {
 	case ttsLimit <- struct{}{}:
 	case <-r.Context().Done():
-		http.Error(w, "timeout", 503)
-		return
+		return errors.New("Timeout")
 	}
 	defer func() { <-ttsLimit }()
 
@@ -52,58 +72,49 @@ func rootHandler(w http.ResponseWriter, r *http.Request) {
 	if !query.Has("url") {
 		slog.Error("Response:", "status", http.StatusBadRequest, "error", "url not present")
 		w.WriteHeader(400)
-		return
+		return nil
 	}
 
 	article, err := readability.FromURL(query.Get("url"), 5*time.Second)
 	if err != nil {
-		slog.Error("Response:", "status", http.StatusInternalServerError, "error", err.Error())
-		w.WriteHeader(500)
-		return
+		return fmt.Errorf("readability frim url error: %w", err)
 	}
 
 	tempF, err := os.CreateTemp("", time.Now().String()+".txt")
 	if err != nil {
-		slog.Error("Response:", "status", http.StatusInternalServerError, "error", err.Error())
-		w.WriteHeader(500)
-		return
+		return fmt.Errorf("create temp file error: %w", err)
 	}
 	defer tempF.Close()
+	defer os.Remove(tempF.Name())
 
 	err = article.RenderText(tempF)
 	if err != nil {
-		slog.Error("Response:", "status", http.StatusInternalServerError, "error", err.Error())
-		w.WriteHeader(500)
-		return
+		return fmt.Errorf("article render text error: %w", err)
 	}
-	defer tempF.Close()
 
-	home, err := os.UserHomeDir()
-	if err != nil {
-		slog.Error("Response:", "status", http.StatusInternalServerError, "error", err.Error())
-		w.WriteHeader(500)
-		return
-	}
+	// We'll use this pipe to stream output from
+	// tts directly to http response
+	readPipe, writePipe := io.Pipe()
 
 	cmd := exec.Command(
 		"kokoro-tts", tempF.Name(),
-		"--model", home+"/.local/share/kokoro-tts/kokoro-v1.0.onnx",
-		"--voices", home+"/.local/share/kokoro-tts/voices-v1.0.bin",
+		"--model", "./model.onnx",
+		"--voices", "./voices.bin",
 		"--format", "mp3",
 		"--voice", "af_heart:50,af_bella:50",
 		"--stream",
 	)
 
-	out, err := cmd.StdoutPipe()
-	if err != nil {
-		slog.Error("Response:", "status", http.StatusInternalServerError, "error", err.Error())
-		w.WriteHeader(500)
-		return
-	}
-
+	cmd.Stdout = writePipe
 	cmd.Start()
 	defer cmd.Wait()
 
+	go func() {
+		<-r.Context().Done()
+		cmd.Process.Signal(os.Kill)
+	}()
+
 	w.Header().Set("Content-Type", "audio/mpeg")
-	io.Copy(w, out)
+	io.Copy(w, readPipe)
+	return nil
 }
