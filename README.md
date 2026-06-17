@@ -1,5 +1,5 @@
 <br />
-<div style="width:100%" align="center"> <img src="./logo.png" alt="TIO Logo"> </div>
+<div style="width:50%" align="center"> <img src="./logo.png" alt="TIO Logo"> </div>
 <p align="center"><strong>Turn any web page into an audio stream!</strong></p>
 <br />
 
