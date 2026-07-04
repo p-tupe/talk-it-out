@@ -61,7 +61,9 @@ async def stream():
 
     article = readabilipy.simple_json_from_html_string(html).get("plain_text") or []
     content = "\n".join((p["text"] for p in article if isinstance(p.get("text"), str)))
-    return Response(generate(content), mimetype="audio/mpeg")
+    response = Response(generate(content), mimetype="audio/mpeg")
+    response.timeout = None  # streaming can take longer than Quart's 60s RESPONSE_TIMEOUT
+    return response
 
 
 async def generate(content: str):
