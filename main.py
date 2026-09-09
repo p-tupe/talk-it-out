@@ -1,13 +1,14 @@
+import asyncio
 import logging
 import os
 
 import httpx
-import readabilipy
-from kokoro_onnx import Kokoro
-from quart import Quart, Response, request, send_from_directory
 import lameenc
 import onnxruntime as rt
-import asyncio
+import readabilipy
+from dotenv import load_dotenv
+from kokoro_onnx import Kokoro
+from quart import Quart, Response, request, send_from_directory
 
 n_threads = os.cpu_count() or 4
 
@@ -35,6 +36,21 @@ sess = rt.InferenceSession(
 kokoro = Kokoro.from_session(sess, "./voices.bin")
 kokoro.create("Hello.", voice="af_heart")  # warmup
 
+load_dotenv()
+MAC_TTS_URL = os.getenv("MAC_TTS_URL", "")
+
+
+@app.route("/tts")
+async def tts():
+    text = request.args.get("text", "")
+    voice = request.args.get("voice", "af_heart")
+    lang = request.args.get("lang", "en-us")
+    if not text:
+        return Response(b"missing text", status=400)
+    response = Response(generate(text, voice, lang), mimetype="audio/mpeg")
+    response.timeout = None
+    return response
+
 
 @app.route("/stream")
 async def stream():
@@ -60,18 +76,20 @@ async def stream():
         )
 
     article = readabilipy.simple_json_from_html_string(html).get("plain_text") or []
-    content = "\n".join((p["text"] for p in article if isinstance(p.get("text"), str)))
+    content = "\n".join(p["text"] for p in article if isinstance(p.get("text"), str))
     response = Response(generate(content), mimetype="audio/mpeg")
-    response.timeout = None  # streaming can take longer than Quart's 60s RESPONSE_TIMEOUT
+    response.timeout = (
+        None  # streaming can take longer than Quart's 60s RESPONSE_TIMEOUT
+    )
     return response
 
 
-async def generate(content: str):
+async def generate(content: str, voice="af_heart", lang="en-us"):
     stream = kokoro.create_stream(
         content,
-        voice="af_heart",
+        voice=voice,
         speed=1.0,
-        lang="en-us",
+        lang=lang,
     )
 
     enc = lameenc.Encoder()
@@ -90,6 +108,28 @@ async def generate(content: str):
     finally:
         enc = None
         await stream.aclose()
+
+
+async def tts_stream(content: str, voice="af_heart", lang="en-us"):
+    """Try Mac if connected, else run wherever this is being served."""
+    if MAC_TTS_URL:
+        try:
+            async with (
+                httpx.AsyncClient(timeout=5) as client,
+                client.stream(
+                    "GET",
+                    MAC_TTS_URL,
+                    params={"text": content, "voice": voice, "lang": lang},
+                ) as resp,
+            ):
+                resp.raise_for_status()
+                async for chunk in resp.aiter_bytes():
+                    yield chunk
+            return
+        except Exception:
+            log.info("Mac TTS unavailable — falling back to local")
+    async for chunk in generate(content, voice, lang):
+        yield chunk
 
 
 @app.route("/")
