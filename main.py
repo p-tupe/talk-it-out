@@ -47,7 +47,7 @@ async def tts():
     lang = request.args.get("lang", "en-us")
     if not text:
         return Response(b"missing text", status=400)
-    response = Response(generate(text, voice, lang), mimetype="audio/mpeg")
+    response = Response(tts_stream(text, voice, lang), mimetype="audio/mpeg")
     response.timeout = None
     return response
 
@@ -57,7 +57,9 @@ async def stream():
     url = request.args.get("url")
     if not url:
         log.error("missing url")
-        return Response(generate("Error: missing url parameter"), mimetype="audio/wav")
+        return Response(
+            tts_stream("error: missing url parameter"), mimetype="audio/mpeg"
+        )
 
     try:
         async with httpx.AsyncClient(timeout=10) as client:
@@ -67,24 +69,59 @@ async def stream():
     except httpx.HTTPStatusError as e:
         log.error("invalid response from url: %d", e.response.status_code)
         return Response(
-            generate("Error: could not get a response from url"), mimetype="audio/wav"
+            tts_stream("error: could not get a response from url"),
+            mimetype="audio/mpeg",
         )
     except Exception as e:
         log.error("invalid response from url: %w", str(e))
         return Response(
-            generate("Error: could not get a response from url"), mimetype="audio/wav"
+            tts_stream("error: could not get a response from url"),
+            mimetype="audio/mpeg",
         )
 
     article = readabilipy.simple_json_from_html_string(html).get("plain_text") or []
     content = "\n".join(p["text"] for p in article if isinstance(p.get("text"), str))
-    response = Response(generate(content), mimetype="audio/mpeg")
+    response = Response(tts_stream(content), mimetype="audio/mpeg")
     response.timeout = (
         None  # streaming can take longer than Quart's 60s RESPONSE_TIMEOUT
     )
     return response
 
 
-async def generate(content: str, voice="af_heart", lang="en-us"):
+@app.route("/")
+async def home():
+    return await send_from_directory("./", "index.html")
+
+
+@app.route("/logo.png")
+async def static_files():
+    return await send_from_directory("./", "logo.png")
+
+
+async def tts_stream(content: str, voice="af_heart", lang="en-us"):
+    """Try Mac if connected, else run wherever this is being served."""
+    if MAC_TTS_URL:
+        try:
+            async with (
+                httpx.AsyncClient(timeout=5) as client,
+                client.stream(
+                    "GET",
+                    MAC_TTS_URL,
+                    params={"text": content, "voice": voice, "lang": lang},
+                ) as resp,
+            ):
+                resp.raise_for_status()
+                async for chunk in resp.aiter_bytes():
+                    yield chunk
+            return
+        except Exception:
+            log.info("Mac TTS unavailable — falling back to local")
+
+    async for chunk in gen_local(content, voice, lang):
+        yield chunk
+
+
+async def gen_local(content: str, voice="af_heart", lang="en-us"):
     stream = kokoro.create_stream(
         content,
         voice=voice,
@@ -108,35 +145,3 @@ async def generate(content: str, voice="af_heart", lang="en-us"):
     finally:
         enc = None
         await stream.aclose()
-
-
-async def tts_stream(content: str, voice="af_heart", lang="en-us"):
-    """Try Mac if connected, else run wherever this is being served."""
-    if MAC_TTS_URL:
-        try:
-            async with (
-                httpx.AsyncClient(timeout=5) as client,
-                client.stream(
-                    "GET",
-                    MAC_TTS_URL,
-                    params={"text": content, "voice": voice, "lang": lang},
-                ) as resp,
-            ):
-                resp.raise_for_status()
-                async for chunk in resp.aiter_bytes():
-                    yield chunk
-            return
-        except Exception:
-            log.info("Mac TTS unavailable — falling back to local")
-    async for chunk in generate(content, voice, lang):
-        yield chunk
-
-
-@app.route("/")
-async def home():
-    return await send_from_directory("./", "index.html")
-
-
-@app.route("/logo.png")
-async def static_files():
-    return await send_from_directory("./", "logo.png")
