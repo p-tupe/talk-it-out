@@ -20,4 +20,4 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 COPY index.html main.py logo.png ./
 
 EXPOSE 8080
-CMD ["uv", "run", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["uv", "run", "uvicorn", "main:app", "--host", "127.0.0.1", "--port", "8083"]

@@ -8,6 +8,7 @@ import onnxruntime as rt
 import readabilipy
 from dotenv import load_dotenv
 from kokoro_onnx import Kokoro
+from piper import PiperVoice
 from quart import Quart, Response, request, send_from_directory
 
 n_threads = os.cpu_count() or 4
@@ -32,9 +33,13 @@ sess_opts.enable_cpu_mem_arena = False
 sess = rt.InferenceSession(
     "./model.onnx", sess_opts, providers=["CPUExecutionProvider"]
 )
-
 kokoro = Kokoro.from_session(sess, "./voices.bin")
-kokoro.create("Hello.", voice="af_heart")  # warmup
+kokoro.create("Hello.", voice="af_heart")
+voices = {
+    "fr-fr": PiperVoice.load("./voices/fr_FR-siwis-medium.onnx"),
+    # "en-us": PiperVoice.load("./voices/en_US-lessac-high.onnx"),
+}
+
 
 load_dotenv()
 MAC_TTS_URL = os.getenv("MAC_TTS_URL", "")
@@ -43,11 +48,10 @@ MAC_TTS_URL = os.getenv("MAC_TTS_URL", "")
 @app.route("/tts")
 async def tts():
     text = request.args.get("text", "")
-    voice = request.args.get("voice", "af_heart")
     lang = request.args.get("lang", "en-us")
     if not text:
         return Response(b"missing text", status=400)
-    response = Response(tts_stream(text, voice, lang), mimetype="audio/mpeg")
+    response = Response(tts_stream(text, lang), mimetype="audio/mpeg")
     response.timeout = None
     return response
 
@@ -98,7 +102,7 @@ async def static_files():
     return await send_from_directory("./", "logo.png")
 
 
-async def tts_stream(content: str, voice="af_heart", lang="en-us"):
+async def tts_stream(content: str, lang="en-us"):
     """Try Mac if connected, else run wherever this is being served."""
     if MAC_TTS_URL:
         try:
@@ -107,7 +111,7 @@ async def tts_stream(content: str, voice="af_heart", lang="en-us"):
                 client.stream(
                     "GET",
                     MAC_TTS_URL,
-                    params={"text": content, "voice": voice, "lang": lang},
+                    params={"text": content, "lang": lang},
                 ) as resp,
             ):
                 resp.raise_for_status()
@@ -117,17 +121,22 @@ async def tts_stream(content: str, voice="af_heart", lang="en-us"):
         except Exception:
             log.info("Mac TTS unavailable — falling back to local")
 
-    async for chunk in gen_local(content, voice, lang):
+    async for chunk in gen_local(content, lang):
         yield chunk
 
 
-async def gen_local(content: str, voice="af_heart", lang="en-us"):
-    stream = kokoro.create_stream(
-        content,
-        voice=voice,
-        speed=1.0,
-        lang=lang,
-    )
+async def gen_local(content: str, lang="en-us"):
+    piper_stream, kokoro_steam = None, None
+
+    if lang == "fr-fr":
+        piper_stream = voices[lang]
+    else:
+        kokoro_steam = kokoro.create_stream(
+            content,
+            voice="af_heart",
+            speed=1.0,
+            lang=lang,
+        )
 
     enc = lameenc.Encoder()
     enc.set_channels(1)
@@ -136,12 +145,18 @@ async def gen_local(content: str, voice="af_heart", lang="en-us"):
     enc.set_bit_rate(128)
 
     try:
-        async for samples, _ in stream:
-            raw = (samples * 32767).astype("<i2").tobytes()
-            yield enc.encode(raw)
-        yield enc.flush()
+        if piper_stream is not None:
+            for chunk in piper_stream.synthesize(content):
+                yield enc.encode(chunk.audio_int16_bytes)
+        elif kokoro_steam is not None:
+            async for chunk, _ in kokoro_steam:
+                raw = (chunk * 32767).astype("<i2").tobytes()
+                yield enc.encode(raw)
+            yield enc.flush()
+        else:
+            log.error("no stream found")
+            raise Exception("No stream found")
     except (asyncio.CancelledError, GeneratorExit):
         log.info("client disconnected")
     finally:
         enc = None
-        await stream.aclose()
