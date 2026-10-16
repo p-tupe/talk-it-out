@@ -3,5 +3,6 @@ services:
     build: .
     environment:
       - MAC_TTS_URL=http://127.0.0.1:8900/kokoro/tts
-    network_mode: host
+    ports:
+      - 8083:8080
     restart: unless-stopped

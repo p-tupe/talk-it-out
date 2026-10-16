@@ -44,6 +44,9 @@ voices = {
 load_dotenv()
 MAC_TTS_URL = os.getenv("MAC_TTS_URL", "")
 
+if MAC_TTS_URL:
+    log.info("Using proxy to " + MAC_TTS_URL)
+
 
 @app.route("/tts")
 async def tts():
