@@ -18,6 +18,9 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-install-project --no-dev
 
 COPY index.html main.py logo.png ./
+COPY voices/* ./voices/
+
+ENV MAC_TTS_URL http://127.0.0.1:8900/kokoro/tts
 
 EXPOSE 8080
 CMD ["uv", "run", "uvicorn", "main:app", "--host", "127.0.0.1", "--port", "8083"]

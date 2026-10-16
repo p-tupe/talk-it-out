@@ -8,7 +8,7 @@ import onnxruntime as rt
 import readabilipy
 from dotenv import load_dotenv
 from kokoro_onnx import Kokoro
-from piper import PiperVoice
+from piper import PiperVoice, SynthesisConfig
 from quart import Quart, Response, request, send_from_directory
 
 n_threads = os.cpu_count() or 4
@@ -134,7 +134,7 @@ async def gen_local(content: str, lang="en-us"):
         kokoro_steam = kokoro.create_stream(
             content,
             voice="af_heart",
-            speed=1.0,
+            speed=0.8,
             lang=lang,
         )
 
@@ -146,7 +146,9 @@ async def gen_local(content: str, lang="en-us"):
 
     try:
         if piper_stream is not None:
-            for chunk in piper_stream.synthesize(content):
+            for chunk in piper_stream.synthesize(
+                content, SynthesisConfig(length_scale=1.6)
+            ):
                 yield enc.encode(chunk.audio_int16_bytes)
         elif kokoro_steam is not None:
             async for chunk, _ in kokoro_steam:
